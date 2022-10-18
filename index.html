@@ -271,10 +271,8 @@ def main():
         try:
             client, _ = my_socket.accept()
             client.recv(4096)
-            # Set appropriate headers
             response_type = &quot;HTTP/1.0 200 OK\n&quot;
             headers = &quot;Content-Type: text/html\n\n&quot;
-            # Read HTML from file
             with open(&quot;index.html&quot;, &quot;r&quot;) as f:
                 body = f.read()
             resp = response_type + headers + body
@@ -287,11 +285,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-</code></pre>
-<p>Создаем сокет <code>my_socket</code> и с помощью метода <code>.listen()</code> запускаем режим прослушивания:</p>
-<pre><code>my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-my_socket.bind(('127.0.0.1', 14900))
-my_socket.listen(10)
 </code></pre>
 <h2 id="4">Задание 4</h2>
 <p>Реализовать двухпользовательский или многопользовательский чат. Реализация
@@ -314,7 +307,7 @@ class ChatClient:
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def _send(self):
-        # Threaded function for sending messages
+        # Многопоточная функция для отправки сообщений
         while True:
             try:
                 msg = input()
@@ -325,7 +318,7 @@ class ChatClient:
                 sys.exit(0)
 
     def _recieve(self):
-        # Threaded function for recieving messages
+        # Многопоточная функция для получения сообщений
         while True:
             try:
                 msg = self.conn.recv(16384).decode()
@@ -335,15 +328,15 @@ class ChatClient:
                 self.conn.close()
                 sys.exit(0)
             except ConnectionError:
-                # Unexpected connection error
+                # Ошибка подключения
                 print(&quot;Connection error&quot;)
                 self.conn.close()
                 sys.exit(1)
 
     def run(self):
-        # Connect
+        # Подключение
         self.conn.connect((self.host, self.port))
-        # Run threaded functions
+        # Запуск многопоточной функции
         Thread(target=self._send).start()
         Thread(target=self._recieve).start()
 
@@ -376,18 +369,18 @@ class ChatServer:
         sys.exit(0)
 
     def _client_broadcast(self, message: bytes, sender: socket.socket) -&gt; None:
-        # Broadcast a message from a client to all the other clients
+        # Отправка сообщения клиента другим клиентам
         for sock in self.clients.copy():
             if sock != sender:
                 try:
                     sock.send(message)
                 except OSError:
-                    # Client disconnected
+                    # Клиент отключился
                     print(&quot;Someone disconnected&quot;)
                     self.clients.remove(sock)
 
     def _client_listen(self, sock: socket.socket) -&gt; None:
-        # Listen for messages from client
+        # Ожидание сообщения от клиента
         sock.settimeout(30)
         while True:
             try:
@@ -399,22 +392,22 @@ class ChatServer:
                 break
 
     def _main(self) -&gt; None:
-        # Run server
+        # Запуск сервера
         self.conn.bind((self.host, self.port))
         self.conn.listen(10)
         while True:
             try:
-                # Accept connection
+                # Подтверждение подключения
                 sock, address = self.conn.accept()
                 print(f&quot;Connection at {address}&quot;)
-                # Create thread for client
+                # Создание потока для клиентов
                 self.clients.append(sock)
                 Thread(target=self._client_listen, args=(sock,)).start()
             except KeyboardInterrupt:
                 self._shutdown()
 
     def run(self) -&gt; None:
-        # Wrapper to start thread for _main()
+        # Упаковщик для запуска многопоточной функции _main()
         Thread(target=self._main).start()
 
 
@@ -431,211 +424,150 @@ if __name__ == '__main__':
 <p>● Принять и записать информацию о дисциплине и оценке по дисциплине.</p>
 <p>● Отдать информацию обо всех оценах по дсициплине в виде html-страницы.</p>
 <pre><code>import socket
-from email.parser import Parser
-from functools import lru_cache
-from urllib.parse import parse_qs, urlparse
 
-MAX_LINE = 64 * 1024
-MAX_HEADERS = 100
 
 class MyHTTPServer:
-    def __init__(self, host, port, server_name):
-        self._host = host
-        self._port = port
-        self._server_name = server_name
-        self._subjects = {}
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.grade = []
+
 
     def serve_forever(self):
-        serv_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        try:
-            serv_sock.bind((self._host, self._port))
-            serv_sock.listen()
-
-            while True:
-                conn, _ = serv_sock.accept()
-                try:
-                    self.serve_client(conn)
-                except Exception as e:
-                    print('Client serving failed', e)
-        finally:
-            serv_sock.close()
-
-    def serve_client(self, conn):
-        try:
-            req = self.parse_request(conn)
-            resp = self.handle_request(req)
-            self.send_response(conn, resp)
-        except ConnectionResetError:
-            conn = None
-        except Exception as e:
-            self.send_error(conn, e)
-
-        if conn:
-            req.rfile.close()
-            conn.close()
-
-    def parse_request(self, conn):
-        rfile = conn.makefile('rb')
-        method, target, ver = self.parse_request_line(rfile)
-        headers = self.parse_headers(rfile)
-        host = headers.get('Host')
-        if not host:
-            raise HTTPError(400, 'Bad request', 'Host header is missing')
-        if host not in (self._server_name, f'{self._server_name}:{self._port}'):
-            raise HTTPError(404, 'Not found')
-        return Request(method, target, ver, headers, rfile)
-
-    def parse_request_line(self, rfile):
-        raw = rfile.readline(MAX_LINE + 1)
-        if len(raw) &gt; MAX_LINE:
-            raise HTTPError(400, 'Bad request', 'Request line is too long')
-
-        req_line = str(raw, 'iso-8859-1')
-        words = req_line.split()
-        if len(words) != 3:
-            raise HTTPError(400, 'Bad request', 'Malformed request line')
-
-        method, target, ver = words
-        if ver != 'HTTP/1.1':
-            raise HTTPError(505, 'HTTP Version Not Supported')
-        return method, target, ver
-
-    def parse_headers(self, rfile):
-        headers = []
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((self.host, self.port))
+        sock.listen()
         while True:
-            line = rfile.readline(MAX_LINE + 1)
-            if len(line) &gt; MAX_LINE:
-                raise HTTPError(494, 'Request header too large')
+            client_socket, _ = sock.accept()
+            self.serve_client(client_socket)
 
-            if line in (b'\r\n', b'\n', b''):
-                break
 
-            headers.append(line)
-            if len(headers) &gt; MAX_HEADERS:
-                raise HTTPError(494, 'Too many headers')
+    def serve_client(self, client_socket):
+        data = client_socket.recv(4096).decode('utf-8')
+        request = self.parse_request(data)
+        response = self.handle_request(request)
+        if response:
+            client_socket.send(response.encode('utf-8'))
+            client_socket.close()
 
-        sheaders = b''.join(headers).decode('iso-8859-1')
-        return Parser().parsestr(sheaders)
 
-    def handle_request(self, req):
-        if req.path == '/subjects' and req.method == 'POST':
-            return self.handle_post_subjects(req)
+    def parse_request(self, data):
+        data_split = data.split('\r\n')
+        print(f&quot;data split : {data_split}&quot;)
+        headers = data_split[0].split()
+        print(f&quot;Headers : {headers}&quot;)
+        body = data_split[-1]
+        request = dict()
 
-        if req.path == '/subjects' and req.method == 'GET':
-            return self.handle_get_subjects(req)
+        if len(headers) == 3:
 
-        raise HTTPError(404, 'Not found')
+            request.update(
+                {&quot;method&quot;: headers[0], &quot;url&quot;: headers[1], &quot;version&quot;: headers[2]})
 
-    def send_response(self, conn, resp):
-        wfile = conn.makefile('wb')
-        status_line = f'HTTP/1.1 {resp.status} {resp.reason}\r\n'
-        wfile.write(status_line.encode('iso-8859-1'))
-
-        if resp.headers:
-            for (key, value) in resp.headers:
-                header_line = f'{key}: {value}\r\n'
-                wfile.write(header_line.encode('iso-8859-1'))
-
-        wfile.write(b'\r\n')
-
-        if resp.body:
-            wfile.write(resp.body)
-
-        wfile.flush()
-        wfile.close()
-
-    def send_error(self, conn, err):
-        try:
-            status = err.status
-            reason = err.reason
-            body = (err.body or err.reason).encode('utf-8')
-        except:
-            status = 500
-            reason = b'Internal Server Error'
-            body = b'Internal Server Error'
-        resp = Response(status, reason, [('Content-Length', len(body))], body)
-        self.send_response(conn, resp)
-
-    def handle_post_subjects(self, req):
-        subject_id = len(self._subjects) + 1
-        self._subjects[subject_id] = {'subject': req.query['subject'][0], 'mark': req.query['mark'][0]}
-        return Response(204, 'Created')
-
-    def handle_get_subjects(self, req):
-        accept = req.headers.get('Accept')
-        if 'text/html' in accept:
-            contentType = 'text/html; charset=utf-8'
-            body = '&lt;html&gt;&lt;head&gt;&lt;/head&gt;&lt;body&gt;'
-            body += f'&lt;div&gt;Subjects&lt;/div&gt;'
-            body += '&lt;ul&gt;'
-            for u in self._subjects.values():
-                body += f'&lt;li&gt;#{u[&quot;subject&quot;]}, {u[&quot;mark&quot;]}&lt;/li&gt;'
-            body += '&lt;/ul&gt;'
-            body += '&lt;/body&gt;&lt;/html&gt;'
+            if &quot;&amp;&quot; in body:
+                parametre = body.split(&quot;&amp;&quot;)
+                request.update({&quot;parametrs&quot;: parametre})
+                return request
+            else:
+                request.update({&quot;parametrs&quot;: {}})
+                return request
         else:
-            return Response(406, 'Not Acceptable')
-
-        body = body.encode('utf-8')
-        headers = [('Content-Type', contentType), ('Content-Length', len(body))]
-        return Response(200, 'OK', headers, body)
+            raise Exception(&quot;Malformed request line&quot;)
 
 
-class Request:
-    def __init__(self, method, target, version, headers, rfile):
-        self.method = method
-        self.target = target
-        self.version = version
-        self.headers = headers
-        self.rfile = rfile
-
-    @property
-    def path(self):
-        return self.url.path
-
-    @property
-    @lru_cache(maxsize=None)
-    def query(self):
-        return parse_qs(self.url.query)
-
-    @property
-    @lru_cache(maxsize=None)
-    def url(self):
-        return urlparse(self.target)
-
-    def body(self):
-        size = self.headers.get('Content-Length')
-        if not size:
-            return None
-        return self.rfile.read(size)
+    def handle_request(self, request):
+        print(request)
+        response = f&quot;{request['version']} 200 OK\n\n&quot;
+        if request[&quot;url&quot;] == &quot;/&quot;:
+            if request[&quot;method&quot;] == &quot;POST&quot;:
+                 self.grade.extend(request[&quot;parametrs&quot;])
+            if request[&quot;method&quot;] == &quot;GET&quot; or &quot;POST&quot;:
+                with open('insert.html') as f:
+                    response += f.read()
+                    return response
+        if request[&quot;url&quot;] == &quot;/journal&quot;:
+            response += &quot;&lt;html&gt;&lt;head&gt;&lt;title&gt;List grades&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&quot;
+            for s in self.grade:
+                response += f&quot;&lt;p&gt;{s} &lt;/p&gt;&quot;
+            response += &quot;&lt;/body&gt;&lt;/html&gt;&quot;
+            return response
 
 
-class Response:
-    def __init__(self, status, reason, headers=None, body=None):
-        self.status = status
-        self.reason = reason
-        self.headers = headers
-        self.body = body
-
-
-class HTTPError(Exception):
-    def __init__(self, status, reason, body=None):
-        super()
-        self.status = status
-        self.reason = reason
-        self.body = body
-
-
-if __name__ == '__main__':
-    host = &quot;127.0.0.1&quot;
-    port = 8008
-    subject = 'irina'
-
-    serv = MyHTTPServer(host, port, subject)
+if __name__ == &quot;__main__&quot;:
+    host = 'localhost'
+    port = 3968
+    myserver = MyHTTPServer(host, port)
     try:
-        serv.serve_forever()
+        myserver.serve_forever()
     except KeyboardInterrupt:
         pass
+</code></pre>
+<p>Параметры сервера:</p>
+<pre><code>    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.grade = []
+</code></pre>
+<p>Запуск сервера на сокете, обработка входящих соединений:</p>
+<pre><code>    def serve_forever(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((self.host, self.port))
+        sock.listen()
+        while True:
+            client_socket, _ = sock.accept()
+            self.serve_client(client_socket)
+</code></pre>
+<p>Обработка клиентского подключения:</p>
+<pre><code>    def serve_client(self, client_socket):
+        data = client_socket.recv(4096).decode('utf-8')
+        request = self.parse_request(data)
+        response = self.handle_request(request)
+        if response:
+            client_socket.send(response.encode('utf-8'))
+            client_socket.close()
+</code></pre>
+<p>Функция для обработки заголовка http+запроса:</p>
+<pre><code>    def parse_request(self, data):
+        data_split = data.split('\r\n')
+        print(f&quot;data split : {data_split}&quot;)
+        headers = data_split[0].split()
+        print(f&quot;Headers : {headers}&quot;)
+        body = data_split[-1]
+        request = dict()
+
+        if len(headers) == 3:
+
+            request.update(
+                {&quot;method&quot;: headers[0], &quot;url&quot;: headers[1], &quot;version&quot;: headers[2]})
+
+            if &quot;&amp;&quot; in body:
+                parametre = body.split(&quot;&amp;&quot;)
+                request.update({&quot;parametrs&quot;: parametre})
+                return request
+            else:
+                request.update({&quot;parametrs&quot;: {}})
+                return request
+        else:
+            raise Exception(&quot;Malformed request line&quot;)
+</code></pre>
+<p>Функция для обработки url в соответствии с нужным методом:</p>
+<pre><code>    def handle_request(self, request):
+        print(request)
+        response = f&quot;{request['version']} 200 OK\n\n&quot;
+        if request[&quot;url&quot;] == &quot;/&quot;:
+            if request[&quot;method&quot;] == &quot;POST&quot;:
+                 self.grade.extend(request[&quot;parametrs&quot;])
+            if request[&quot;method&quot;] == &quot;GET&quot; or &quot;POST&quot;:
+                with open('insert.html') as f:
+                    response += f.read()
+                    return response
+        if request[&quot;url&quot;] == &quot;/journal&quot;:
+            response += &quot;&lt;html&gt;&lt;head&gt;&lt;title&gt;List grades&lt;/title&gt;&lt;/head&gt;&lt;body&gt;&quot;
+            for s in self.grade:
+                response += f&quot;&lt;p&gt;{s} &lt;/p&gt;&quot;
+            response += &quot;&lt;/body&gt;&lt;/html&gt;&quot;
+            return response
 </code></pre>
 
   <br>
@@ -652,5 +584,5 @@ if __name__ == '__main__':
 </html>
 <!--
 MkDocs version : 1.4.0
-Build Date UTC : 2022-10-18 16:10:59.876621+00:00
+Build Date UTC : 2022-10-18 18:11:54.135706+00:00
 -->
